@@ -21,7 +21,7 @@ into a folder that matches its type — `Images/`, `Documents/`, `Code/`, and so
 ## Installation
 
 ```bash
-git clone https://github.com/<your-username>/smart-file-organizer.git
+git clone https://github.com/guoguoguo-dev/smart-file-organizer.git
 cd smart-file-organizer
 pip install -e .
 ```
