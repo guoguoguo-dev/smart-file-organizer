@@ -9,7 +9,7 @@ description = "A small CLI that sorts files into folders by type."
 readme = "README.md"
 requires-python = ">=3.9"
 license = { text = "MIT" }
-authors = [{ name = "Your Name", email = "you@example.com" }]
+authors = [{ name = "Zion Gorden", email = "https0218@gmail.com" }]
 keywords = ["cli", "files", "organizer", "productivity"]
 classifiers = [
     "Programming Language :: Python :: 3",
