@@ -67,6 +67,49 @@ def test_skips_files_already_in_category_folder(sample_dir: Path):
     assert all(m.src.name != "nested.png" for m in plan.moves)
 
 
+def test_same_name_files_in_different_directories_are_all_kept(tmp_path: Path):
+    (tmp_path / "a").mkdir()
+    (tmp_path / "b").mkdir()
+    (tmp_path / "a" / "report.txt").write_text("from-a")
+    (tmp_path / "b" / "report.txt").write_text("from-b")
+
+    org = Organizer()
+    plan = org.plan(tmp_path, recursive=True)
+    destinations = [move.dst for move in plan.moves]
+    assert len(destinations) == len(set(destinations)) == 2
+
+    stats = org.execute(plan)
+    assert stats == {"moved": 2, "errors": 0, "skipped": 0}
+    assert sorted(p.read_text() for p in (tmp_path / "Documents").iterdir()) == ["from-a", "from-b"]
+
+
+def test_planned_targets_reserved_alongside_existing_files(tmp_path: Path):
+    (tmp_path / "Documents").mkdir()
+    (tmp_path / "Documents" / "report.txt").write_text("existing")
+    (tmp_path / "a").mkdir()
+    (tmp_path / "b").mkdir()
+    (tmp_path / "a" / "report.txt").write_text("from-a")
+    (tmp_path / "b" / "report.txt").write_text("from-b")
+
+    plan = Organizer().plan(tmp_path, recursive=True)
+    assert sorted(move.dst.name for move in plan.moves) == ["report_1.txt", "report_2.txt"]
+
+
+def test_execute_keeps_file_created_after_planning(tmp_path: Path):
+    (tmp_path / "photo.jpg").write_text("planned")
+    org = Organizer()
+    plan = org.plan(tmp_path)
+
+    target = tmp_path / "Images" / "photo.jpg"
+    target.parent.mkdir()
+    target.write_text("appeared-later")
+
+    stats = org.execute(plan)
+    assert stats == {"moved": 1, "errors": 0, "skipped": 0}
+    assert target.read_text() == "appeared-later"
+    assert (tmp_path / "Images" / "photo_1.jpg").read_text() == "planned"
+
+
 def test_load_rules_from_json(tmp_path: Path):
     rules_file = tmp_path / "rules.json"
     rules_file.write_text('{"Design": [".psd", ".ai"]}')
