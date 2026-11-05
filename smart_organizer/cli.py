@@ -67,6 +67,11 @@ def main(argv: list[str] | None = None) -> int:
         print("\nDry run — no files were moved.")
         return 0
 
-    stats = organizer.execute(plan)
+    report = organizer.execute_detailed(plan)
+    for result in report.results:
+        if result.status == "failed":
+            print(f"  failed: {result.src} -> {result.dst} ({result.error})", file=sys.stderr)
+
+    stats = report.summary()
     print(f"\nDone. Moved: {stats['moved']}, Errors: {stats['errors']}, Skipped: {stats['skipped']}")
     return 0 if stats["errors"] == 0 else 1
