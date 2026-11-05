@@ -6,7 +6,7 @@ import os
 import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional, Set
+from typing import Dict, Iterator, List, Optional, Set, Tuple
 
 from .rules import DEFAULT_RULES, build_extension_map
 
@@ -29,6 +29,8 @@ class Plan:
     """What the organizer intends to do."""
     moves: List[Move] = field(default_factory=list)
     skipped: List[Path] = field(default_factory=list)
+    # Why a path was left alone (hidden file, already-organized folder, symlink).
+    skip_reasons: Dict[Path, str] = field(default_factory=dict)
 
     @property
     def total(self) -> int:
@@ -54,17 +56,14 @@ class Organizer:
             raise NotADirectoryError(f"Not a directory: {source}")
 
         plan = Plan()
-        entries: Iterable[Path] = source.rglob("*") if recursive else source.iterdir()
         # Targets already assigned in this plan: two source files must never
         # share a destination, even if the destination does not exist yet.
         reserved: Set[str] = set()
 
-        for entry in entries:
-            if not entry.is_file():
-                continue
-            # Skip hidden files and files already inside a category folder
-            if entry.name.startswith(".") or entry.parent.name in self.category_names:
+        for entry, reason in self._scan(source, recursive):
+            if reason is not None:
                 plan.skipped.append(entry)
+                plan.skip_reasons[entry] = reason
                 continue
 
             category = self.categorize(entry)
@@ -73,6 +72,42 @@ class Organizer:
             plan.moves.append(Move(src=entry, dst=target, category=category))
 
         return plan
+
+    def _scan(self, source: Path, recursive: bool) -> Iterator[Tuple[Path, Optional[str]]]:
+        """Yield ``(path, skip_reason)`` for everything directly under *source*.
+
+        Directories are pruned before descending, so the subtree of a hidden
+        directory, of a root-level category directory, or of a symlinked
+        directory is never visited. The source directory itself is never
+        treated as a category folder, even when it is named e.g. ``Images``.
+        """
+        pending: List[Path] = [source]
+        while pending:
+            current = pending.pop()
+            try:
+                children = sorted(current.iterdir())
+            except OSError:
+                continue
+            for child in children:
+                name = child.name
+                if child.is_symlink():
+                    yield child, "symlink"
+                    continue
+                if child.is_dir():
+                    if not recursive:
+                        continue
+                    if name.startswith("."):
+                        yield child, "hidden directory"
+                        continue
+                    if current == source and name in self.category_names:
+                        yield child, "already organized"
+                        continue
+                    pending.append(child)
+                    continue
+                if name.startswith("."):
+                    yield child, "hidden file"
+                    continue
+                yield child, None
 
     @staticmethod
     def _unique_target(target: Path, reserved: Optional[Set[str]] = None) -> Path:
