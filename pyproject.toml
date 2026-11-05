@@ -28,3 +28,4 @@ include = ["smart_organizer*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["."]
