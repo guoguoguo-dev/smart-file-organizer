@@ -1,9 +1,11 @@
 """Tests for the smart file organizer."""
 
+import json
 from pathlib import Path
 
 import pytest
 
+from smart_organizer.cli import main
 from smart_organizer.organizer import Organizer
 from smart_organizer.rules import build_extension_map, load_rules
 
@@ -164,3 +166,56 @@ def test_load_rules_from_json(tmp_path: Path):
 def test_build_extension_map_lowercases():
     mapping = build_extension_map({"Images": [".JPG", ".PNG"]})
     assert mapping == {".jpg": "Images", ".png": "Images"}
+
+
+@pytest.mark.parametrize(
+    "name",
+    ["../Outside", "..", ".", "/abs/outside", "C:\\outside", "a/b", "a\\b", " ", "trailing.", "trailing "],
+)
+def test_load_rules_rejects_unsafe_category_names(tmp_path: Path, name: str):
+    rules_file = tmp_path / "rules.json"
+    rules_file.write_text(json.dumps({name: [".txt"]}), encoding="utf-8")
+
+    with pytest.raises(ValueError) as excinfo:
+        load_rules(rules_file)
+
+    assert "Category" in str(excinfo.value)
+
+
+def test_load_rules_accepts_ordinary_category_names(tmp_path: Path):
+    rules_file = tmp_path / "rules.json"
+    rules_file.write_text(json.dumps({"Design Files": [".psd"], "数据": [".csv"]}), encoding="utf-8")
+
+    assert set(load_rules(rules_file)) == {"Design Files", "数据"}
+
+
+def test_organizer_rejects_unsafe_category_names():
+    with pytest.raises(ValueError):
+        Organizer({"../Outside": [".txt"]})
+
+
+def test_cli_rejects_unsafe_rules_without_moving_anything(tmp_path: Path):
+    src = tmp_path / "src"
+    src.mkdir()
+    (src / "note.txt").write_text("keep me")
+    rules_file = tmp_path / "rules.json"
+    rules_file.write_text(json.dumps({"../Outside": [".txt"]}), encoding="utf-8")
+
+    assert main([str(src), "-c", str(rules_file)]) == 2
+    assert (src / "note.txt").exists()
+    assert not (tmp_path / "Outside").exists()
+
+
+def test_category_symlink_cannot_escape_source(tmp_path: Path):
+    src = tmp_path / "src"
+    src.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (src / "note.txt").write_text("x")
+    try:
+        (src / "Documents").symlink_to(outside, target_is_directory=True)
+    except (OSError, NotImplementedError):
+        pytest.skip("directory symlinks are not permitted on this platform")
+
+    with pytest.raises(ValueError):
+        Organizer().plan(src)

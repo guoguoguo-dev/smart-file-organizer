@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, Iterator, List, Optional, Set, Tuple
 
-from .rules import DEFAULT_RULES, build_extension_map
+from .rules import DEFAULT_RULES, build_extension_map, validate_category_name
 
 
 def _path_key(path: Path) -> str:
@@ -41,7 +41,13 @@ class Organizer:
     """Organize files into folders based on their extension."""
 
     def __init__(self, rules: Optional[Dict[str, List[str]]] = None) -> None:
-        self.rules = rules if rules is not None else {k: list(v) for k, v in DEFAULT_RULES.items()}
+        if rules is None:
+            base = {k: list(v) for k, v in DEFAULT_RULES.items()}
+        else:
+            base = {str(k): list(v) for k, v in rules.items()}
+        for name in base:
+            validate_category_name(name)
+        self.rules = base
         self.ext_map = build_extension_map(self.rules)
         self.category_names = set(self.rules) | {"Others"}
 
@@ -59,6 +65,7 @@ class Organizer:
         # Targets already assigned in this plan: two source files must never
         # share a destination, even if the destination does not exist yet.
         reserved: Set[str] = set()
+        category_dirs: Dict[str, Path] = {}
 
         for entry, reason in self._scan(source, recursive):
             if reason is not None:
@@ -67,7 +74,9 @@ class Organizer:
                 continue
 
             category = self.categorize(entry)
-            target = self._unique_target(source / category / entry.name, reserved)
+            if category not in category_dirs:
+                category_dirs[category] = self._category_dir(source, category)
+            target = self._unique_target(category_dirs[category] / entry.name, reserved)
             reserved.add(_path_key(target))
             plan.moves.append(Move(src=entry, dst=target, category=category))
 
@@ -108,6 +117,20 @@ class Organizer:
                     yield child, "hidden file"
                     continue
                 yield child, None
+
+    @staticmethod
+    def _category_dir(source: Path, category: str) -> Path:
+        """Return the category folder, refusing paths that escape *source*.
+
+        ``resolve()`` also catches an existing category folder that is a
+        symlink pointing outside the organized tree.
+        """
+        target = source / category
+        if not target.resolve().is_relative_to(source):
+            raise ValueError(
+                f"Category {category!r} resolves outside the organized directory"
+            )
+        return target
 
     @staticmethod
     def _unique_target(target: Path, reserved: Optional[Set[str]] = None) -> Path:

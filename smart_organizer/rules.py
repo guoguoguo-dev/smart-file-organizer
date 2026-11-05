@@ -29,6 +29,30 @@ def build_extension_map(rules: Dict[str, List[str]]) -> Dict[str, str]:
     return mapping
 
 
+def validate_category_name(name: str) -> str:
+    """Return *name* if it is a safe single-level directory name.
+
+    Category names are joined onto the organized directory, so anything that
+    could change that boundary (``..``, absolute paths, drive letters, path
+    separators) is rejected instead of silently moving files out of the tree.
+    """
+    if not isinstance(name, str):
+        raise ValueError(f"Category name must be a string, got {type(name).__name__}")
+    if not name or not name.strip():
+        raise ValueError("Category name must not be empty")
+    if name != name.strip():
+        raise ValueError(f"Category {name!r} must not start or end with whitespace")
+    if name in {".", ".."}:
+        raise ValueError(f"Category {name!r} is not allowed")
+    if any(char in name for char in ("/", "\\", "\x00")):
+        raise ValueError(f"Category {name!r} must be a single directory name")
+    if Path(name).is_absolute() or Path(name).drive:
+        raise ValueError(f"Category {name!r} must be a relative directory name")
+    if name.rstrip(" .") != name:
+        raise ValueError(f"Category {name!r} must not end with a dot or a space")
+    return name
+
+
 def load_rules(path: str | Path | None) -> Dict[str, List[str]]:
     """Load rules from a JSON file, or fall back to the built-in defaults."""
     if path is None:
@@ -48,5 +72,6 @@ def load_rules(path: str | Path | None) -> Dict[str, List[str]]:
     for category, extensions in data.items():
         if not isinstance(extensions, list):
             raise ValueError(f"Category '{category}' must map to a list of extensions")
-        rules[str(category)] = [str(e).lower() for e in extensions]
+        name = validate_category_name(str(category))
+        rules[name] = [str(e).lower() for e in extensions]
     return rules
