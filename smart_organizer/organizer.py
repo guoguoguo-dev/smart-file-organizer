@@ -37,6 +37,36 @@ class Plan:
         return len(self.moves)
 
 
+@dataclass
+class MoveResult:
+    """Outcome for a single planned move."""
+    src: Path
+    dst: Path
+    category: str
+    status: str  # "moved" (or "would move" during a dry run) / "failed"
+    error: str = ""
+
+
+@dataclass
+class ExecutionReport:
+    """Per-file outcome plus the aggregate counts derived from it."""
+    results: List[MoveResult] = field(default_factory=list)
+    skipped: int = 0
+    dry_run: bool = False
+
+    @property
+    def moved(self) -> int:
+        return sum(1 for result in self.results if result.status == "moved")
+
+    @property
+    def errors(self) -> int:
+        return sum(1 for result in self.results if result.status == "failed")
+
+    def summary(self) -> Dict[str, int]:
+        """Aggregate counts, always consistent with ``results``."""
+        return {"moved": self.moved, "errors": self.errors, "skipped": self.skipped}
+
+
 class Organizer:
     """Organize files into folders based on their extension."""
 
@@ -151,11 +181,15 @@ class Organizer:
 
     def execute(self, plan: Plan, dry_run: bool = False) -> Dict[str, int]:
         """Apply a plan. Returns a summary of what happened."""
-        stats = {"moved": 0, "errors": 0, "skipped": len(plan.skipped)}
+        return self.execute_detailed(plan, dry_run=dry_run).summary()
+
+    def execute_detailed(self, plan: Plan, dry_run: bool = False) -> ExecutionReport:
+        """Apply a plan and report the real outcome of every single move."""
+        report = ExecutionReport(skipped=len(plan.skipped), dry_run=dry_run)
 
         for move in plan.moves:
             if dry_run:
-                stats["moved"] += 1
+                report.results.append(MoveResult(move.src, move.dst, move.category, "moved"))
                 continue
             try:
                 move.dst.parent.mkdir(parents=True, exist_ok=True)
@@ -164,8 +198,16 @@ class Organizer:
                 if move.dst.exists():
                     move.dst = self._unique_target(move.dst)
                 shutil.move(str(move.src), str(move.dst))
-                stats["moved"] += 1
-            except (OSError, shutil.Error):
-                stats["errors"] += 1
+                report.results.append(MoveResult(move.src, move.dst, move.category, "moved"))
+            except (OSError, shutil.Error) as exc:
+                report.results.append(
+                    MoveResult(
+                        move.src,
+                        move.dst,
+                        move.category,
+                        "failed",
+                        f"{type(exc).__name__}: {exc}",
+                    )
+                )
 
-        return stats
+        return report

@@ -219,3 +219,48 @@ def test_category_symlink_cannot_escape_source(tmp_path: Path):
 
     with pytest.raises(ValueError):
         Organizer().plan(src)
+
+
+def test_execute_detailed_reports_every_move(tmp_path: Path):
+    (tmp_path / "a.txt").write_text("a")
+    (tmp_path / "b.jpg").write_bytes(b"b")
+    org = Organizer()
+
+    report = org.execute_detailed(org.plan(tmp_path))
+
+    assert [(r.src.name, r.status) for r in report.results] == [("a.txt", "moved"), ("b.jpg", "moved")]
+    assert all(r.dst.exists() for r in report.results)
+    assert report.summary() == {"moved": 2, "errors": 0, "skipped": 0}
+
+
+def test_execute_detailed_reports_partial_failure(tmp_path: Path):
+    (tmp_path / "a.txt").write_text("a")
+    (tmp_path / "b.jpg").write_bytes(b"b")
+    org = Organizer()
+    plan = org.plan(tmp_path)
+    (tmp_path / "Images").write_text("a file where the folder should go")
+
+    report = org.execute_detailed(plan)
+    stats = report.summary()
+
+    assert stats["moved"] == 1
+    assert stats["errors"] == 1
+    failed = [r for r in report.results if r.status == "failed"]
+    assert len(failed) == 1
+    assert failed[0].src == tmp_path / "b.jpg"
+    assert failed[0].dst == tmp_path / "Images" / "b.jpg"
+    assert failed[0].error
+    assert (tmp_path / "b.jpg").exists()
+    assert (tmp_path / "Documents" / "a.txt").exists()
+
+
+def test_execute_detailed_dry_run_does_not_touch_disk(tmp_path: Path):
+    (tmp_path / "a.txt").write_text("a")
+    org = Organizer()
+
+    report = org.execute_detailed(org.plan(tmp_path), dry_run=True)
+
+    assert report.dry_run is True
+    assert report.summary()["moved"] == 1
+    assert (tmp_path / "a.txt").exists()
+    assert not (tmp_path / "Documents").exists()
