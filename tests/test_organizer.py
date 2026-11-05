@@ -67,6 +67,51 @@ def test_skips_files_already_in_category_folder(sample_dir: Path):
     assert all(m.src.name != "nested.png" for m in plan.moves)
 
 
+def test_recursive_prunes_hidden_and_category_subtrees(tmp_path: Path):
+    (tmp_path / ".git").mkdir()
+    (tmp_path / ".git" / "config").write_text("[core]")
+    (tmp_path / ".cache").mkdir()
+    (tmp_path / ".cache" / "data.bin").write_bytes(b"x")
+    (tmp_path / "Images" / "nested").mkdir(parents=True)
+    (tmp_path / "Images" / "nested" / "photo.jpg").write_bytes(b"jpg")
+    (tmp_path / "notes.txt").write_text("hi")
+
+    plan = Organizer().plan(tmp_path, recursive=True)
+
+    assert [m.src.relative_to(tmp_path).as_posix() for m in plan.moves] == ["notes.txt"]
+    assert plan.skip_reasons[tmp_path / ".git"] == "hidden directory"
+    assert plan.skip_reasons[tmp_path / ".cache"] == "hidden directory"
+    assert plan.skip_reasons[tmp_path / "Images"] == "already organized"
+
+
+def test_root_directory_named_like_category_is_still_organized(tmp_path: Path):
+    root = tmp_path / "Images"
+    root.mkdir()
+    (root / "report.txt").write_text("content")
+
+    plan = Organizer().plan(root)
+
+    assert [m.src.name for m in plan.moves] == ["report.txt"]
+    assert plan.moves[0].dst == root / "Documents" / "report.txt"
+
+
+def test_same_name_directory_outside_category_area_is_walked(tmp_path: Path):
+    nested = tmp_path / "photos" / "Images"
+    nested.mkdir(parents=True)
+    (nested / "pic.png").write_bytes(b"x")
+
+    plan = Organizer().plan(tmp_path, recursive=True)
+
+    assert [m.src.relative_to(tmp_path).as_posix() for m in plan.moves] == ["photos/Images/pic.png"]
+
+
+def test_hidden_file_records_reason(tmp_path: Path):
+    (tmp_path / ".secret").write_text("x")
+    plan = Organizer().plan(tmp_path)
+    assert tmp_path / ".secret" in plan.skipped
+    assert plan.skip_reasons[tmp_path / ".secret"] == "hidden file"
+
+
 def test_same_name_files_in_different_directories_are_all_kept(tmp_path: Path):
     (tmp_path / "a").mkdir()
     (tmp_path / "b").mkdir()
