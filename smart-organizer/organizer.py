@@ -2,12 +2,18 @@
 
 from __future__ import annotations
 
+import os
 import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional
+from typing import Dict, Iterable, List, Optional, Set
 
 from .rules import DEFAULT_RULES, build_extension_map
+
+
+def _path_key(path: Path) -> str:
+    """Normalize a path for comparison (case-insensitive on Windows)."""
+    return os.path.normcase(str(path))
 
 
 @dataclass
@@ -49,6 +55,9 @@ class Organizer:
 
         plan = Plan()
         entries: Iterable[Path] = source.rglob("*") if recursive else source.iterdir()
+        # Targets already assigned in this plan: two source files must never
+        # share a destination, even if the destination does not exist yet.
+        reserved: Set[str] = set()
 
         for entry in entries:
             if not entry.is_file():
@@ -59,20 +68,26 @@ class Organizer:
                 continue
 
             category = self.categorize(entry)
-            target = self._unique_target(source / category / entry.name)
+            target = self._unique_target(source / category / entry.name, reserved)
+            reserved.add(_path_key(target))
             plan.moves.append(Move(src=entry, dst=target, category=category))
 
         return plan
 
     @staticmethod
-    def _unique_target(target: Path) -> Path:
-        """Append a counter to avoid overwriting existing files."""
-        if not target.exists():
+    def _unique_target(target: Path, reserved: Optional[Set[str]] = None) -> Path:
+        """Append a counter to avoid overwriting existing or already-planned files."""
+        reserved = reserved if reserved is not None else set()
+
+        def taken(candidate: Path) -> bool:
+            return candidate.exists() or _path_key(candidate) in reserved
+
+        if not taken(target):
             return target
         counter = 1
         while True:
             candidate = target.with_name(f"{target.stem}_{counter}{target.suffix}")
-            if not candidate.exists():
+            if not taken(candidate):
                 return candidate
             counter += 1
 
@@ -86,6 +101,10 @@ class Organizer:
                 continue
             try:
                 move.dst.parent.mkdir(parents=True, exist_ok=True)
+                # A file may have appeared at the destination after planning;
+                # pick a fresh name instead of silently clobbering it.
+                if move.dst.exists():
+                    move.dst = self._unique_target(move.dst)
                 shutil.move(str(move.src), str(move.dst))
                 stats["moved"] += 1
             except (OSError, shutil.Error):
